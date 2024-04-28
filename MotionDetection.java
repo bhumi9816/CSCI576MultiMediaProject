@@ -2,6 +2,8 @@ import org.opencv.core.*;
 import org.opencv.videoio.VideoCapture;
 import org.opencv.imgproc.Imgproc;
 
+import javafx.application.Application;
+
 import java.io.File;
 import java.io.FileWriter;
 import java.io.BufferedReader;
@@ -16,7 +18,7 @@ public class MotionDetection {
     public static void main(String[] args) throws IOException {
         System.loadLibrary(Core.NATIVE_LIBRARY_NAME);
 
-        if (args.length != 2) {
+        if (args.length != 3) {
             System.err.println("Usage: java MotionDetection <videosFolderPath> <sampleVideoPath>");
             System.exit(1);
         }
@@ -26,10 +28,50 @@ public class MotionDetection {
         String databaseFilePath = "motiondb.txt";
         String queryFeaturesFilePath = "sample.txt";
 
-        buildVideoDatabase(videoFolderPath, databaseFilePath);
+        //buildVideoDatabase(videoFolderPath, databaseFilePath);
+
+        AudioParser audioParser = new AudioParser();
+        String audioMatch = analyzeAudio(args, audioParser);
 
         System.out.println("\nQuerying the database with a sample query video...");
         queryVideoDatabase(sampleVideoPath, databaseFilePath, queryFeaturesFilePath);
+
+        System.out.println(audioMatch);
+
+        int bestMatchFrameAA = audioParser.currentMinFrameAA;
+        double startSeconds = bestMatchFrameAA / 30.0;
+        double startMillis = startSeconds * 1000.0;
+        String startTime = String.valueOf(startMillis);
+        Application.launch(MP4Player.class, audioParser.currentMinVidAA, startTime);
+
+    }
+
+    private static String analyzeAudio(String[] args, AudioParser audioParser) {
+
+        // Analyze the query video
+        String queryPath = args[2];
+        audioParser.analyzeQuery(queryPath);
+
+        // Find the best matching video and print out results
+        audioParser.findBestMatch();
+
+        int bestMatchFrameZC = audioParser.currentMinFrameZC;
+        int bestMatchFrameAA = audioParser.currentMinFrameAA;
+        double startSeconds = bestMatchFrameAA / 30.0;
+        double startMillis = startSeconds * 1000.0;
+        String startTime = String.valueOf(startMillis);
+        int startMinutes = (int) startSeconds / 60;
+        int startSeconds2 = (int) (startSeconds % 60);
+
+        //System.out.println("The best match using zero-crossing rate is in " + audioParser.currentMinVidZC + " at frame "
+               // + bestMatchFrameZC);
+
+        //System.out.println("The best match using average amplitude is in " + audioParser.currentMinVidAA + " at frame "
+                //+ bestMatchFrameAA + " which is time " + startMinutes + ":" + startSeconds2);
+
+        return "The best match using average amplitude is in " + audioParser.currentMinVidAA + " at frame "
+                + bestMatchFrameAA + " which is time " + startMinutes + ":" + startSeconds2;
+
     }
 
     private static void buildVideoDatabase(String videoFolderPath, String databaseFilePath) throws IOException {
