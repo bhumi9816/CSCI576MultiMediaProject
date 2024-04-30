@@ -1,207 +1,361 @@
-import org.opencv.core.Core;
-import org.opencv.core.CvType;
-import org.opencv.core.Mat;
-import org.opencv.core.MatOfFloat;
-import org.opencv.core.MatOfInt;
-import org.opencv.core.Scalar;
-import org.opencv.core.Size;
-import org.opencv.highgui.HighGui;
-import org.opencv.imgproc.Imgproc;
-import org.opencv.videoio.VideoCapture;
-
-import javax.sound.sampled.AudioInputStream;
-import javax.sound.sampled.AudioSystem;
-import javax.sound.sampled.UnsupportedAudioFileException;
-import java.io.File;
-import java.io.IOException;
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.*;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 public class Main {
-    static { System.loadLibrary(Core.NATIVE_LIBRARY_NAME); }
+    private static final double HISTOGRAM_THRESHOLD = 0.5;
+    private static final double SHOT_BOUNDARY_THRESHOLD = 0.5;
 
     public static void main(String[] args) {
-        System.out.println("Hello World!");
-        if (args.length < 2) {
-            System.out.println("Usage: MyProject.exe QueryVideo.rgb QueryAudio.wav");
-            return;
-        }
+        System.out.println("Hello world!");
 
         String queryVideoPath = args[0];
 
-        Map<String, Mat> videoFeaturesMap = new HashMap<>();
-        Map<String, Mat> audioFeaturesMap = new HashMap<>();
+        /**
+         * Database Pre-Processing
+         * */
+        String databaseDirectory = "/Users/ptbhum/Desktop/csci576:568/MultiMediaProjectColorHistogram/DatabaseVideos";
+        List<VideoMetadata> database = preprocessDatabase(databaseDirectory);
+        System.out.println("Database processing done");
 
-        // Step 2: Load database containing 40 videos
-        List<String> databaseVideoPaths = loadDatabaseVideos();
+        /**
+         * Query Video Processing
+         * */
+        List<BufferedImage> queryFrames = extractFrames(queryVideoPath);
+        List<double[]> queryHistograms = calculateColorHistograms(queryFrames);
 
-        for (String videoPath : databaseVideoPaths) {
-            // Step 4: Extract video and audio features for each video
-            Mat videoFeatures = extractShotVideoFeatures(videoPath);
-
-            // Step 5: Store features in data structures
-            videoFeaturesMap.put(videoPath, videoFeatures);
+        List<MatchedVideo> matchedVideos = testMatchVideos(database, queryHistograms);
+        for(MatchedVideo matchedVideo: matchedVideos) {
+            System.out.println("The matchedVideos size is " + matchedVideo.getVideoName());
         }
 
-        // Step 6: Extract features from the query video
-        Mat queryVideoFeatures = extractShotVideoFeatures(queryVideoPath);
+        System.out.println("Done matching the database and query videos");
 
-        // Step 7: Match query video features with database videos and play the start of the matched video
-        matchAndPlayStart(queryVideoFeatures, videoFeaturesMap);
-
+        System.out.print("Done processing the video files ");
     }
 
-    // Load the videos from the database
-    private static List<String> loadDatabaseVideos() {
-        List<String> databaseVideoPaths = new ArrayList<>();
-        // Replace this with code to load video paths from your database directory
-        File databaseDirectory = new File("video1.mp4");
-        File[] files = databaseDirectory.listFiles();
-        if (files != null) {
-            for (File file : files) {
-                if (file.isFile()) {
-                    databaseVideoPaths.add(file.getAbsolutePath());
+    private static List<VideoMetadata> preprocessDatabase(String databaseDirectory) {
+        List<VideoMetadata> videoMetadataList = new ArrayList<>();
+
+        // Get list of files in the database directory
+        File[] videoFiles = new File(databaseDirectory).listFiles();
+        if(videoFiles == null) {
+            System.out.println("No video file is processed");
+        }
+
+        if (videoFiles != null) {
+            // Iterate through each video file
+            for (File videoFile : videoFiles) {
+                if (videoFile.isFile()) {
+                    // Extract metadata for the current video file
+                    String filePath = videoFile.getAbsolutePath();
+                    double duration = getVideoDuration(filePath); // Implement a method to get video duration
+                    System.out.println("Video duration: " + duration + " seconds");
+
+                    List<BufferedImage> frames = extractFrames(filePath); // Implement a method to extract frames
+                    List<double[]> histograms = calculateColorHistograms(frames);
+                    List<Integer> shotBoundaries = detectShotBoundaries(frames, histograms);
+
+                    // Create a VideoMetadata instance and add it to the list
+                    VideoMetadata videoMetadata = new VideoMetadata(filePath, duration, frames, histograms, shotBoundaries);
+                    videoMetadata.setShotBoundaries(shotBoundaries);
+                    videoMetadataList.add(videoMetadata);
                 }
             }
         }
-        return databaseVideoPaths;
+
+        System.out.println("Length of video metadata " + videoMetadataList.size());
+
+        return videoMetadataList;
     }
 
-    // Method to extract Shot boundary for each video in the database and save in hash data-structure
-    private static Mat extractShotVideoFeatures(String videoPath) {
-        VideoCapture capture = new VideoCapture(videoPath);
-        if (!capture.isOpened()) {
-            System.err.println("Error: Could not open video file.");
-            return null;
+    private static List<Integer> detectShotBoundaries(List<BufferedImage> frames, List<double[]> histograms) {
+        List<Integer> shotBoundaries = new ArrayList<>();
+
+        // Compare consecutive frames' histograms
+        for (int i = 1; i < histograms.size(); i++) {
+            double[] prevHistogram = histograms.get(i - 1);
+            double[] currHistogram = histograms.get(i);
+
+            // Calculate histogram difference (e.g., Euclidean distance)
+            double difference = calculateHistogramDifference(prevHistogram, currHistogram);
+
+            // If the difference exceeds a threshold, consider it a shot boundary
+            if (difference > SHOT_BOUNDARY_THRESHOLD) {
+                shotBoundaries.add(i); // Store the index of the frame
+            }
         }
 
-        Mat aggregatedFeatures = new Mat();
-        Mat previousFrame = new Mat();
-        Mat currentFrame = new Mat();
-        boolean firstFrame = true;
+        return shotBoundaries;
+    }
 
-        while (capture.read(currentFrame)) {
-            // Convert frames to grayscale for simplicity
-            Imgproc.cvtColor(currentFrame, currentFrame, Imgproc.COLOR_BGR2GRAY);
+    private static double calculateHistogramDifference(double[] histogram1, double[] histogram2) {
+        // Calculate Euclidean distance between histograms
+        double distance = 0.0;
+        for (int j = 0; j < histogram1.length; j++) {
+            distance += Math.pow(histogram1[j] - histogram2[j], 2);
+        }
+        return Math.sqrt(distance);
+    }
 
-            if (!firstFrame) {
-                // Compute absolute difference between frames
-                Mat diffFrame = new Mat();
-                Core.absdiff(currentFrame, previousFrame, diffFrame);
+    private static List<double[]> calculateColorHistograms(List<BufferedImage> frames) {
+        List<double[]> histograms = new ArrayList<>();
+        for (BufferedImage frame : frames) {
+            double[] histogram = calculateHistogram(frame);
+            histograms.add(histogram);
+        }
+        System.out.println("The length of the histograms for frames " + histograms.size());
+        return histograms;
+    }
 
-                // Calculate the average pixel intensity difference as a simple shot boundary detection
-                Scalar meanDiff = Core.mean(diffFrame);
+    private static double[] calculateHistogram(BufferedImage frame) {
+        int width = frame.getWidth();
+        int height = frame.getHeight();
+        int numBins = 256; // Number of bins for each color channel
+        double[] histogram = new double[numBins * 3]; // Histogram for RGB channels concatenated
 
-                // If the mean difference exceeds a threshold, consider it as a shot boundary
-                if (meanDiff.val[0] > 10) {
-                    // Extract features from the shot region
-                    Mat shotFeatures = extractFeaturesFromShot(previousFrame);
+        // Iterate over each pixel in the image
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int rgb = frame.getRGB(x, y);
+                int red = (rgb >> 16) & 0xFF;
+                int green = (rgb >> 8) & 0xFF;
+                int blue = rgb & 0xFF;
 
-                    // Concatenate the features from all shots
-                    if (aggregatedFeatures.empty()) {
-                        aggregatedFeatures = shotFeatures.clone();
-                    } else {
-                        Core.hconcat(Arrays.asList(new Mat[]{aggregatedFeatures, shotFeatures}), aggregatedFeatures);
-                    }
+                // Increment the corresponding bin in the histogram for each color channel
+                histogram[red]++;
+                histogram[green + numBins]++;
+                histogram[blue + 2 * numBins]++;
+            }
+        }
+
+        // Normalize the histogram (optional but recommended)
+        int totalPixels = width * height;
+        for (int i = 0; i < histogram.length; i++) {
+            histogram[i] /= totalPixels;
+        }
+
+        return histogram;
+    }
+
+    private static double getVideoDuration(String filePath) {
+        try {
+            // Build the ffmpeg command to get the duration
+            String[] command = {"/Users/ptbhum/Desktop/csci576:568/MultiMediaProjectColorHistogram/ffmpeg", "-i", filePath};
+
+            // Execute the command
+            Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+
+            // Read the output of the command
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.contains("Duration")) {
+                    // Parse the duration from the output line
+                    String[] parts = line.split(",")[0].split(":");
+                    int hours = Integer.parseInt(parts[1].trim());
+                    int minutes = Integer.parseInt(parts[2].trim());
+                    String[] secondsParts = parts[3].trim().split("\\.");
+                    int seconds = Integer.parseInt(secondsParts[0]);
+                    int milliseconds = Integer.parseInt(secondsParts[1]);
+                    System.out.print("The duration " + milliseconds);
+                    // Calculate the total duration in seconds
+                    return hours * 3600 + minutes * 60 + seconds + milliseconds / 1000.0;
                 }
             }
 
-            // Update previous frame
-            currentFrame.copyTo(previousFrame);
-            firstFrame = false;
+            // Close the reader and wait for the process to complete
+            reader.close();
+            process.waitFor();
+        } catch (IOException | InterruptedException e) {
+            e.printStackTrace();
         }
 
-        capture.release();
-
-        return aggregatedFeatures;
+        // Return a default duration if unable to retrieve from ffmpeg
+        return 0.0;
     }
 
-    private static Mat extractFeaturesFromShot(Mat frame) {
-        // Implement feature extraction from shot region here
-        // You can use this method to extract features from each shot region
-        // For example, you can calculate histograms, texture features, etc.
-        // You can access the frame for the shot region
-        // Perform feature extraction based on your requirements
+    private static List<BufferedImage> extractFrames(String videoFilePath) {
+        System.out.println("Extracting database/query video frames " + videoFilePath);
+        List<BufferedImage> frames = new ArrayList<>();
 
-        // For demonstration purposes, we'll just resize the frame
-        Mat resizedFrame = new Mat();
-        Imgproc.resize(frame, resizedFrame, new Size(100, 100)); // Resize to 100x100 pixels
+        try {
+            // Execute FFmpeg command to extract frames
+            ProcessBuilder processBuilder = new ProcessBuilder(
+                    "/Users/ptbhum/Desktop/csci576:568/MultiMediaProjectColorHistogram/ffmpeg", "-i", videoFilePath, "-vf", "fps=1", "-f", "image2pipe", "-pix_fmt", "rgb24", "-")
+                    .redirectErrorStream(true);
+            Process process = processBuilder.start();
 
-        return resizedFrame.reshape(1, 1); // Convert to row vector
+            // Read FFmpeg output to get frames
+            InputStream inputStream = process.getInputStream();
+            byte[] buffer = new byte[1024];
+            int bytesRead;
+
+            // Read frame data into a byte array
+            while ((bytesRead = inputStream.read(buffer)) != -1) {
+                // Create a BufferedImage from the byte array
+                ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(buffer, 0, bytesRead);
+                BufferedImage frame = ImageIO.read(byteArrayInputStream);
+                if (frame != null && !isBMP(frame)) {
+                    frames.add(frame);
+                }
+            }
+
+            // Wait for the process to complete
+            process.waitFor();
+        } catch (IOException | InterruptedException e) {
+            e.printStackTrace();
+        }
+
+        return frames;
     }
 
-    private static void matchAndPlayStart(Mat queryFeatures, Map<String, Mat> databaseFeaturesMap) {
-        Map<String, Double> similarityScores = new HashMap<>();
-
-        // Iterate over database videos and compute similarity with query features
-        for (Map.Entry<String, Mat> entry : databaseFeaturesMap.entrySet()) {
-            String videoName = entry.getKey();
-            Mat databaseFeatures = entry.getValue();
-
-            // Compute similarity using a distance or similarity measure
-            double similarity = computeMatchSimilarity(queryFeatures, databaseFeatures);
-
-            // Store the similarity score
-            similarityScores.put(videoName, similarity);
-        }
-
-        // Rank database videos based on similarity scores
-        List<Map.Entry<String, Double>> rankedVideos = new ArrayList<>(similarityScores.entrySet());
-        rankedVideos.sort(Map.Entry.comparingByValue());
-
-        // Output the top-ranked video
-        if (!rankedVideos.isEmpty()) {
-            String topRankedVideoPath = rankedVideos.get(0).getKey();
-            System.out.println("Top-ranked video: " + topRankedVideoPath);
-
-            // Play the start of the top-ranked video
-            playVideoStart(topRankedVideoPath);
-        } else {
-            System.out.println("No match found in the database.");
-        }
+    private static boolean isBMP(BufferedImage image) {
+        return image.getColorModel().toString().contains("BMP");
     }
 
-    private static double computeMatchSimilarity(Mat queryFeatures, Mat databaseFeatures) {
-        // Ensure both matrices have the same size
-        if (queryFeatures.size().equals(databaseFeatures.size())) {
-            // Compute Euclidean distance between query and database features
-            Mat diff = new Mat();
-            Core.absdiff(queryFeatures, databaseFeatures, diff);
-            diff.convertTo(diff, CvType.CV_32F);
-            double euclideanDistance = Core.norm(diff, Core.NORM_L2);
+    private static double calculateTemporalHistogramSimilarity(List<double[]> queryHistograms, List<double[]> databaseHistograms) {
+        int querySize = queryHistograms.size();
+        int databaseSize = databaseHistograms.size();
 
-            // Return the similarity score (inverse of distance)
-            return 1.0 / (1.0 + euclideanDistance);
-        } else {
-            // Return a default similarity score if matrices have different sizes
-            return 0.0;
+        // Choose the smaller sequence length
+        int minLength = Math.min(querySize, databaseSize);
+
+        double totalSimilarity = 0.0;
+
+        // Adjust the sliding window size according to the sequence length
+        int windowSize = Math.min(10, minLength); // Choose an appropriate window size
+
+        // Slide the window over the sequences
+        for (int i = 0; i <= minLength - windowSize; i++) {
+            List<double[]> queryWindow = queryHistograms.subList(i, i + windowSize);
+            List<double[]> databaseWindow = databaseHistograms.subList(i, i + windowSize);
+
+            // Calculate color histogram similarity for the current window
+            double windowSimilarity = calculateColorHistogramSimilarity(queryWindow, databaseWindow);
+            totalSimilarity += windowSimilarity;
         }
+
+        // Average the similarities
+        return totalSimilarity / (minLength - windowSize + 1); // Adjusted for the number of windows
     }
 
-    private static void playVideoStart(String videoPath) {
-        VideoCapture capture = new VideoCapture(videoPath);
-        if (!capture.isOpened()) {
-            System.err.println("Error: Could not open video file.");
-            return;
-        }
+    private static List<MatchedVideo> testMatchVideos(List<VideoMetadata> database, List<double[]> queryHistograms) {
+        List<MatchedVideo> matchedVideos = new ArrayList<>();
 
-        Mat frame = new Mat();
-        while (capture.read(frame)) {
-            HighGui.imshow("Video", frame); // Display the frame
-            int key = HighGui.waitKey(30); // Delay in milliseconds
+        // Iterate through each database video
+        for (VideoMetadata videoMetadata : database) {
 
-            // Break the loop if 'ESC' key is pressed
-            if (key == 27) {
-                break;
+            String videoName = new File(videoMetadata.getFilePath()).getName(); // Extract video name from file path
+            List<double[]> databaseHistograms = videoMetadata.getHistograms();
+
+            // Calculate color histogram similarity
+            double colorHistogramSimilarity = calculateColorHistogramSimilarity(queryHistograms, databaseHistograms);
+
+            double sequenceSimilarity = calculateTemporalHistogramSimilarity(queryHistograms, databaseHistograms);
+
+            // Check if sequence similarity exceeds the threshold
+            if (sequenceSimilarity >= HISTOGRAM_THRESHOLD) {
+                matchedVideos.add(new MatchedVideo(videoName, 0.0)); // Start time is not relevant in this case
             }
         }
 
-        capture.release();
-        HighGui.destroyAllWindows();
+
+            // Check if similarity exceeds the threshold
+           /* if (colorHistogramSimilarity >= HISTOGRAM_THRESHOLD) {
+                matchedVideos.add(new MatchedVideo(videoName, 0.0)); // Start time is not relevant in this case
+            }*/
+
+        return matchedVideos;
+
     }
 
+    private static double calculateColorHistogramSimilarity(List<double[]> queryHistograms, List<double[]> databaseHistograms) {
+        int minSize = Math.min(queryHistograms.size(), databaseHistograms.size());
+        double totalSimilarity = 0.0;
+
+        // Calculate similarity for each pair of histograms
+        for (int i = 0; i < minSize; i++) {
+            double[] queryHistogram = queryHistograms.get(i);
+            double[] databaseHistogram = databaseHistograms.get(i);
+            double histogramSimilarity = calculateHistogramSimilarity(queryHistogram, databaseHistogram);
+            totalSimilarity += histogramSimilarity;
+        }
+
+        // Average the similarities
+        return totalSimilarity / minSize;
+    }
+
+    private static double calculateHistogramSimilarity(double[] histogram1, double[] histogram2) {
+        // Calculate Euclidean distance between the histograms
+        double distance = 0.0;
+        for (int j = 0; j < histogram1.length; j++) {
+            distance += Math.pow(histogram1[j] - histogram2[j], 2);
+        }
+        distance = Math.sqrt(distance);
+
+        // Normalize distance to get similarity
+        return 1.0 / (1.0 + distance);
+    }
 }
 
+class MatchedVideo {
+    private String videoName;
+    private double startTime;
+
+    public MatchedVideo(String videoName, double startTime) {
+        this.videoName = videoName;
+        this.startTime = startTime;
+    }
+
+    public String getVideoName() {
+        return videoName;
+    }
+
+    public double getStartTime() {
+        return startTime;
+    }
+}
+
+class VideoMetadata {
+    private String filePath;
+    private double duration;
+    private List<BufferedImage> frames;
+    private List<double[]> histograms;
+
+    private List<Integer> shotBoundaries;
+
+    public VideoMetadata(String filePath, double duration, List<BufferedImage> frames, List<double[]> histograms, List<Integer> shotBoundaries) {
+        this.filePath = filePath;
+        this.duration = duration;
+        this.frames = frames;
+        this.histograms = histograms;
+        this.shotBoundaries = shotBoundaries;
+    }
+
+    public String getFilePath() {
+        return filePath;
+    }
+
+    public double getDuration() {
+        return duration;
+    }
+
+    public List<BufferedImage> getFrames() {
+        return frames;
+    }
+
+    public List<Integer> getShotBoundaries() {
+        return shotBoundaries;
+    }
+
+    public List<double[]> getHistograms() {
+        return histograms;
+    }
+
+    public void setShotBoundaries(List<Integer> shotBoundaries) {
+        this.shotBoundaries = shotBoundaries;
+    }
+}
