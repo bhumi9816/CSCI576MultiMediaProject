@@ -10,26 +10,32 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.Comparator;
 
 public class MotionDetection {
+    private String videoFolderPath;
+    private String sampleVideoPath;
+    private String databaseFilePath;
+    private String queryFeaturesFilePath;
 
-    public static void main(String[] args) throws IOException {
+    public MotionDetection(String videoFolderPath, String sampleVideoPath, String databaseFilePath, String queryFeaturesFilePath) {
+        this.videoFolderPath = videoFolderPath;
+        this.sampleVideoPath = sampleVideoPath;
+        this.databaseFilePath = databaseFilePath;
+        this.queryFeaturesFilePath = queryFeaturesFilePath;
+    }
+
+    public List<String[]> runMotionDetection() throws IOException, InterruptedException, ExecutionException {
         System.loadLibrary(Core.NATIVE_LIBRARY_NAME);
 
-        if (args.length != 2) {
-            System.err.println("Usage: java MotionDetection <videosFolderPath> <sampleVideoPath>");
-            System.exit(1);
-        }
+        // Build video database.
+        //buildVideoDatabase(videoFolderPath, databaseFilePath);
 
-        String videoFolderPath = args[0];
-        String sampleVideoPath = args[1];
-        String databaseFilePath = "motiondb.txt";
-        String queryFeaturesFilePath = "sample.txt";
+        //System.out.println("\nQuerying the database with a sample query video...");
+        List<String[]> topMatches = queryVideoDatabase(sampleVideoPath, databaseFilePath, queryFeaturesFilePath);
 
-        buildVideoDatabase(videoFolderPath, databaseFilePath);
-
-        System.out.println("\nQuerying the database with a sample query video...");
-        queryVideoDatabase(sampleVideoPath, databaseFilePath, queryFeaturesFilePath);
+        return topMatches;
     }
 
     private static void buildVideoDatabase(String videoFolderPath, String databaseFilePath) throws IOException {
@@ -80,7 +86,7 @@ public class MotionDetection {
     }
 
     private static List<double[]> extractFeatures(String videoFilePath) {
-        System.out.println("Extracting features from video: " + videoFilePath);
+        //System.out.println("Extracting features from video: " + videoFilePath);
         VideoCapture capture = new VideoCapture(videoFilePath);
         List<double[]> videoFeatures = new ArrayList<>();
         int frameNumber = -2;
@@ -128,7 +134,7 @@ public class MotionDetection {
             capture.release();
         }
     
-        System.out.println("Feature extraction complete for video: " + videoFilePath);
+        //System.out.println("Feature extraction complete for video: " + videoFilePath);
     
         return videoFeatures;
     }
@@ -145,14 +151,14 @@ public class MotionDetection {
         System.gc(); // Explicitly call garbage collector to release any remaining memory
     }
     
-    private static void queryVideoDatabase(String sampleVideoPath, String databaseFilePath, String queryFeaturesFilePath) {
-        System.out.println("Querying the database with the query video: " + sampleVideoPath);
+    private List<String[]> queryVideoDatabase(String sampleVideoPath, String databaseFilePath, String queryFeaturesFilePath) {
+        //System.out.println("Querying the database with the query video: " + sampleVideoPath);
     
         // Extract features from the query video
         List<double[]> queryFeatures = extractFeatures(sampleVideoPath);
-        System.out.println("Features extracted successfully from the query video.");
+        //System.out.println("Features extracted successfully from the query video.");
 
-        System.out.println("Writing features to the sample features file...");
+        //System.out.println("Writing features to the sample features file...");
         writeFeaturesToFile(queryFeaturesFilePath, queryFeatures);
     
         // Read features from the database file
@@ -162,12 +168,14 @@ public class MotionDetection {
         List<String> videoFilePaths = extractVideoFilePaths(databaseFilePath);
     
         // Find the best match in the database
-        System.out.println("Finding the best match in the database...");
-        String[] bestMatchInfo = findBestMatch(queryFeatures, databaseFeatures, videoFilePaths);
+        //System.out.println("Finding the best match in the database...");
+        List<String[]> bestMatchInfo = findBestMatch(queryFeatures, databaseFeatures, videoFilePaths);
     
         // Output best match information
-        System.out.println("Best match video: " + bestMatchInfo[0]);
-        System.out.println("Start frame: " + bestMatchInfo[1]);
+        //System.out.println("Best match video: " + bestMatchInfo[0]);
+        //System.out.println("Start frame: " + bestMatchInfo[1]);
+
+        return bestMatchInfo; 
     }
 
     private static void writeFeaturesToFile(String filePath, List<double[]> features) {
@@ -202,7 +210,7 @@ public class MotionDetection {
     }
     
     private static List<List<double[]>> readFeaturesFromDatabase(String databaseFilePath) {
-        System.out.println("Reading features from the database file: " + databaseFilePath);
+        //System.out.println("Reading features from the database file: " + databaseFilePath);
         List<List<double[]>> databaseFeatures = new ArrayList<>();
     
         try (BufferedReader reader = new BufferedReader(new FileReader(databaseFilePath))) {
@@ -236,18 +244,13 @@ public class MotionDetection {
             e.printStackTrace();
         }
     
-        System.out.println("Database features read successfully.");
+        //System.out.println("Database features read successfully.");
         return databaseFeatures;
     }
     
-    private static String[] findBestMatch(List<double[]> queryFeatures, List<List<double[]>> databaseFeatures, List<String> videoFilePaths) {
-        double bestMatchScore = Double.MAX_VALUE;
-        int bestMatchIndex = -1;
-        int bestMatchStartFrame = -1;
-        String bestMatchVideoName = "";
-    
-        // Get the length of the query video in frames
-        int queryVideoLength = queryFeatures.size();
+    private static List<String[]> findBestMatch(List<double[]> queryFeatures, List<List<double[]>> databaseFeatures, List<String> videoFilePaths) {
+        List<String[]> topMatches = new ArrayList<>();
+        int numMatchesToFind = 3; // Number of top matches to find
     
         // Iterate through all videos in the database
         for (int i = 0; i < databaseFeatures.size(); i++) {
@@ -255,11 +258,11 @@ public class MotionDetection {
             int databaseVideoLength = videoFeatures.size();
     
             // Iterate through all possible starting points for the sample video in the database video
-            for (int startFrameIndex = 0; startFrameIndex <= databaseVideoLength - queryVideoLength; startFrameIndex++) {
+            for (int startFrameIndex = 0; startFrameIndex <= databaseVideoLength - queryFeatures.size(); startFrameIndex++) {
                 double totalDifference = 0;
     
                 // Compare the features of each frame in the query video with the corresponding frames in the database video
-                for (int j = 0; j < queryVideoLength; j++) {
+                for (int j = 0; j < queryFeatures.size(); j++) {
                     double[] queryFeature = queryFeatures.get(j);
                     double[] databaseFeature = videoFeatures.get(startFrameIndex + j);
                     // Calculate the absolute difference between feature values
@@ -275,21 +278,27 @@ public class MotionDetection {
                     totalDifference += featureDifference;
                 }
     
-                // If the total difference is smaller than the current best match, update the best match
-                if (totalDifference < bestMatchScore) {
-                    bestMatchScore = totalDifference;
-                    bestMatchIndex = i;
-                    bestMatchStartFrame = (int) videoFeatures.get(startFrameIndex)[0]; // Get the frame number of the first frame in the match
-                    bestMatchVideoName = videoFilePaths.get(i); // Get the video file name corresponding to the best match
+                // Add the match to the list of top matches if it's within the top matches found so far
+                if (topMatches.size() < numMatchesToFind || totalDifference < Double.parseDouble(topMatches.get(topMatches.size() - 1)[2])) {
+                    // Create match information array
+                    String[] matchInfo = new String[3];
+                    matchInfo[0] = videoFilePaths.get(i); // Video name
+                    matchInfo[1] = String.valueOf((int) videoFeatures.get(startFrameIndex)[0]); // Start frame
+                    matchInfo[2] = String.valueOf(totalDifference); // Match score
     
-                    // Print out the score
-                    System.out.println("Best match video: " + bestMatchVideoName);
-                    System.out.println("Best match score: " + bestMatchScore);
+                    // Add the match to the list of top matches
+                    topMatches.add(matchInfo);
+    
+                    // Sort the top matches based on match score
+                    topMatches.sort(Comparator.comparingDouble(match -> Double.parseDouble(match[2])));
+    
+                    // Remove any excess matches beyond the top 3
+                    if (topMatches.size() > numMatchesToFind) {
+                        topMatches.remove(topMatches.size() - 1);
+                    }
                 }
             }
         }
-        return new String[]{bestMatchVideoName, String.valueOf(bestMatchStartFrame)};
+        return topMatches;
     }
-    
 }
-
