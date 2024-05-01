@@ -2,11 +2,11 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.*;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.PriorityQueue;
 
 public class Main {
-    private static final double HISTOGRAM_THRESHOLD = 0.5;
-    private static final double SHOT_BOUNDARY_THRESHOLD = 0.5;
 
     public static void main(String[] args) {
         System.out.println("Hello world!");
@@ -27,13 +27,20 @@ public class Main {
         List<double[]> queryHistograms = calculateColorHistograms(queryFrames);
 
         List<MatchedVideo> matchedVideos = testMatchVideos(database, queryHistograms);
-        for(MatchedVideo matchedVideo: matchedVideos) {
-            System.out.println("The matchedVideos size is " + matchedVideo.getVideoName());
+        if (!matchedVideos.isEmpty()) {
+            System.out.println("Top 10 matched videos:");
+            for (int i = 0; i < Math.min(10, matchedVideos.size()); i++) {
+                MatchedVideo matchedVideo = matchedVideos.get(i);
+                System.out.println("Video Name: " + matchedVideo.getVideoName());
+                System.out.println("Similarity Score: " + matchedVideo.getSimilarity());
+                System.out.println("-------------------------------------");
+            }
+        } else {
+            System.out.println("No matched videos found.");
         }
 
         System.out.println("Done matching the database and query videos");
 
-        System.out.print("Done processing the video files ");
     }
 
     private static List<VideoMetadata> preprocessDatabase(String databaseDirectory) {
@@ -56,48 +63,15 @@ public class Main {
 
                     List<BufferedImage> frames = extractFrames(filePath); // Implement a method to extract frames
                     List<double[]> histograms = calculateColorHistograms(frames);
-                    List<Integer> shotBoundaries = detectShotBoundaries(frames, histograms);
 
                     // Create a VideoMetadata instance and add it to the list
-                    VideoMetadata videoMetadata = new VideoMetadata(filePath, duration, frames, histograms, shotBoundaries);
-                    videoMetadata.setShotBoundaries(shotBoundaries);
+                    VideoMetadata videoMetadata = new VideoMetadata(filePath, duration, frames, histograms);
                     videoMetadataList.add(videoMetadata);
                 }
             }
         }
 
-        System.out.println("Length of video metadata " + videoMetadataList.size());
-
         return videoMetadataList;
-    }
-
-    private static List<Integer> detectShotBoundaries(List<BufferedImage> frames, List<double[]> histograms) {
-        List<Integer> shotBoundaries = new ArrayList<>();
-
-        // Compare consecutive frames' histograms
-        for (int i = 1; i < histograms.size(); i++) {
-            double[] prevHistogram = histograms.get(i - 1);
-            double[] currHistogram = histograms.get(i);
-
-            // Calculate histogram difference (e.g., Euclidean distance)
-            double difference = calculateHistogramDifference(prevHistogram, currHistogram);
-
-            // If the difference exceeds a threshold, consider it a shot boundary
-            if (difference > SHOT_BOUNDARY_THRESHOLD) {
-                shotBoundaries.add(i); // Store the index of the frame
-            }
-        }
-
-        return shotBoundaries;
-    }
-
-    private static double calculateHistogramDifference(double[] histogram1, double[] histogram2) {
-        // Calculate Euclidean distance between histograms
-        double distance = 0.0;
-        for (int j = 0; j < histogram1.length; j++) {
-            distance += Math.pow(histogram1[j] - histogram2[j], 2);
-        }
-        return Math.sqrt(distance);
     }
 
     private static List<double[]> calculateColorHistograms(List<BufferedImage> frames) {
@@ -106,15 +80,14 @@ public class Main {
             double[] histogram = calculateHistogram(frame);
             histograms.add(histogram);
         }
-        System.out.println("The length of the histograms for frames " + histograms.size());
         return histograms;
     }
 
     private static double[] calculateHistogram(BufferedImage frame) {
         int width = frame.getWidth();
         int height = frame.getHeight();
-        int numBins = 256; // Number of bins for each color channel
-        double[] histogram = new double[numBins * 3]; // Histogram for RGB channels concatenated
+        int numBins = 512;
+        double[] histogram = new double[numBins * 3];
 
         // Iterate over each pixel in the image
         for (int y = 0; y < height; y++) {
@@ -124,14 +97,12 @@ public class Main {
                 int green = (rgb >> 8) & 0xFF;
                 int blue = rgb & 0xFF;
 
-                // Increment the corresponding bin in the histogram for each color channel
                 histogram[red]++;
                 histogram[green + numBins]++;
                 histogram[blue + 2 * numBins]++;
             }
         }
 
-        // Normalize the histogram (optional but recommended)
         int totalPixels = width * height;
         for (int i = 0; i < histogram.length; i++) {
             histogram[i] /= totalPixels;
@@ -166,14 +137,14 @@ public class Main {
                 }
             }
 
-            // Close the reader and wait for the process to complete
+
             reader.close();
             process.waitFor();
         } catch (IOException | InterruptedException e) {
             e.printStackTrace();
         }
 
-        // Return a default duration if unable to retrieve from ffmpeg
+
         return 0.0;
     }
 
@@ -182,20 +153,16 @@ public class Main {
         List<BufferedImage> frames = new ArrayList<>();
 
         try {
-            // Execute FFmpeg command to extract frames
             ProcessBuilder processBuilder = new ProcessBuilder(
                     "/Users/ptbhum/Desktop/csci576:568/MultiMediaProjectColorHistogram/ffmpeg", "-i", videoFilePath, "-vf", "fps=1", "-f", "image2pipe", "-pix_fmt", "rgb24", "-")
                     .redirectErrorStream(true);
             Process process = processBuilder.start();
 
-            // Read FFmpeg output to get frames
             InputStream inputStream = process.getInputStream();
             byte[] buffer = new byte[1024];
             int bytesRead;
 
-            // Read frame data into a byte array
             while ((bytesRead = inputStream.read(buffer)) != -1) {
-                // Create a BufferedImage from the byte array
                 ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(buffer, 0, bytesRead);
                 BufferedImage frame = ImageIO.read(byteArrayInputStream);
                 if (frame != null && !isBMP(frame)) {
@@ -203,7 +170,6 @@ public class Main {
                 }
             }
 
-            // Wait for the process to complete
             process.waitFor();
         } catch (IOException | InterruptedException e) {
             e.printStackTrace();
@@ -220,53 +186,52 @@ public class Main {
         int querySize = queryHistograms.size();
         int databaseSize = databaseHistograms.size();
 
-        // Choose the smaller sequence length
         int minLength = Math.min(querySize, databaseSize);
 
         double totalSimilarity = 0.0;
 
-        // Adjust the sliding window size according to the sequence length
-        int windowSize = Math.min(10, minLength); // Choose an appropriate window size
+        int windowSize = Math.min(10, minLength);
 
-        // Slide the window over the sequences
+
         for (int i = 0; i <= minLength - windowSize; i++) {
             List<double[]> queryWindow = queryHistograms.subList(i, i + windowSize);
             List<double[]> databaseWindow = databaseHistograms.subList(i, i + windowSize);
 
-            // Calculate color histogram similarity for the current window
             double windowSimilarity = calculateColorHistogramSimilarity(queryWindow, databaseWindow);
             totalSimilarity += windowSimilarity;
         }
 
-        // Average the similarities
-        return totalSimilarity / (minLength - windowSize + 1); // Adjusted for the number of windows
+        return totalSimilarity / (minLength - windowSize + 1);
     }
 
     private static List<MatchedVideo> testMatchVideos(List<VideoMetadata> database, List<double[]> queryHistograms) {
-        List<MatchedVideo> matchedVideos = new ArrayList<>();
 
-        // Iterate through each database video
+        PriorityQueue<MatchedVideo> topMatches = new PriorityQueue<>(Comparator.comparingDouble(MatchedVideo::getSimilarity));
+
         for (VideoMetadata videoMetadata : database) {
 
-            String videoName = new File(videoMetadata.getFilePath()).getName(); // Extract video name from file path
+            String videoName = new File(videoMetadata.getFilePath()).getName();
             List<double[]> databaseHistograms = videoMetadata.getHistograms();
 
-            // Calculate color histogram similarity
             double colorHistogramSimilarity = calculateColorHistogramSimilarity(queryHistograms, databaseHistograms);
 
             double sequenceSimilarity = calculateTemporalHistogramSimilarity(queryHistograms, databaseHistograms);
 
-            // Check if sequence similarity exceeds the threshold
-            if (sequenceSimilarity >= HISTOGRAM_THRESHOLD) {
-                matchedVideos.add(new MatchedVideo(videoName, 0.0)); // Start time is not relevant in this case
+            double combinedSimilarity = colorHistogramSimilarity * sequenceSimilarity;
+            System.out.print("Similarity score is " + combinedSimilarity);
+
+            MatchedVideo matchedVideo = new MatchedVideo(videoName, 0.0, combinedSimilarity);
+
+            topMatches.offer(matchedVideo);
+
+            if (topMatches.size() > 10) {
+                topMatches.poll();
             }
         }
 
+        List<MatchedVideo> matchedVideos = new ArrayList<>(topMatches);
 
-            // Check if similarity exceeds the threshold
-           /* if (colorHistogramSimilarity >= HISTOGRAM_THRESHOLD) {
-                matchedVideos.add(new MatchedVideo(videoName, 0.0)); // Start time is not relevant in this case
-            }*/
+        matchedVideos.sort(Comparator.comparingDouble(MatchedVideo::getSimilarity).reversed());
 
         return matchedVideos;
 
@@ -289,25 +254,26 @@ public class Main {
     }
 
     private static double calculateHistogramSimilarity(double[] histogram1, double[] histogram2) {
-        // Calculate Euclidean distance between the histograms
-        double distance = 0.0;
+        double chiSquareDistance = 0.0;
         for (int j = 0; j < histogram1.length; j++) {
-            distance += Math.pow(histogram1[j] - histogram2[j], 2);
+            if (histogram1[j] + histogram2[j] != 0) {
+                chiSquareDistance += Math.pow(histogram1[j] - histogram2[j], 2) / (histogram1[j] + histogram2[j]);
+            }
         }
-        distance = Math.sqrt(distance);
+        return 1.0 / (1.0 + chiSquareDistance);
 
-        // Normalize distance to get similarity
-        return 1.0 / (1.0 + distance);
     }
 }
 
 class MatchedVideo {
     private String videoName;
     private double startTime;
+    private double similarity;
 
-    public MatchedVideo(String videoName, double startTime) {
+    public MatchedVideo(String videoName, double startTime, double similarity) {
         this.videoName = videoName;
         this.startTime = startTime;
+        this.similarity = similarity;
     }
 
     public String getVideoName() {
@@ -317,6 +283,10 @@ class MatchedVideo {
     public double getStartTime() {
         return startTime;
     }
+
+    public double getSimilarity() {
+        return similarity;
+    }
 }
 
 class VideoMetadata {
@@ -325,14 +295,11 @@ class VideoMetadata {
     private List<BufferedImage> frames;
     private List<double[]> histograms;
 
-    private List<Integer> shotBoundaries;
-
-    public VideoMetadata(String filePath, double duration, List<BufferedImage> frames, List<double[]> histograms, List<Integer> shotBoundaries) {
+    public VideoMetadata(String filePath, double duration, List<BufferedImage> frames, List<double[]> histograms) {
         this.filePath = filePath;
         this.duration = duration;
         this.frames = frames;
         this.histograms = histograms;
-        this.shotBoundaries = shotBoundaries;
     }
 
     public String getFilePath() {
@@ -347,15 +314,8 @@ class VideoMetadata {
         return frames;
     }
 
-    public List<Integer> getShotBoundaries() {
-        return shotBoundaries;
-    }
-
     public List<double[]> getHistograms() {
         return histograms;
     }
 
-    public void setShotBoundaries(List<Integer> shotBoundaries) {
-        this.shotBoundaries = shotBoundaries;
-    }
 }
