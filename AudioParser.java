@@ -23,6 +23,10 @@ public class AudioParser {
     public int secondMinFrameAA;
     public int thirdMinFrameAA;
 
+    double currentMinDifference;
+    double currentSecondBestDiff;
+    double currentThirdBestDiff;
+
     // Empty constructor for main class to instantiate an AudioParser
     public AudioParser() {
     }
@@ -251,7 +255,10 @@ public class AudioParser {
 
                 if (currentDiffAA < currentMinDifferenceAA) {
 
+                    currentThirdBestDiff = currentSecondBestDiff;
+                    currentSecondBestDiff = currentMinDifference;
                     currentMinDifferenceAA = currentDiffAA;
+                    currentMinDifference = currentDiffAA;
 
                     thirdMinVidAA = secondMinVidAA;
                     secondMinVidAA = currentMinVidAA;
@@ -289,9 +296,12 @@ public class AudioParser {
 
     public List<String[]> retrieveResults() {
 
-        String[] bestMatch = {currentMinVidAA, String.valueOf(currentMinFrameAA), ""};
-        String[] secondMatch = {secondMinVidAA, String.valueOf(secondMinFrameAA), ""};
-        String[] thirdMatch = {thirdMinVidAA, String.valueOf(thirdMinFrameAA), ""};
+        String[] bestMatch = {currentMinVidAA, String.valueOf(currentMinFrameAA),
+                String.valueOf(currentMinDifference), ""};
+        String[] secondMatch = {secondMinVidAA, String.valueOf(secondMinFrameAA),
+                String.valueOf(currentSecondBestDiff), ""};
+        String[] thirdMatch = {thirdMinVidAA, String.valueOf(thirdMinFrameAA),
+                String.valueOf(currentThirdBestDiff), ""};
 
         List<String[]> results = new ArrayList<>();
         results.add(bestMatch);

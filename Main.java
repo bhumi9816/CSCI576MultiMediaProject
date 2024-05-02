@@ -1,5 +1,7 @@
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
+import java.awt.image.DataBuffer;
+import java.awt.image.DataBufferByte;
 import java.io.*;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -14,14 +16,12 @@ public class Main {
     public static void main(String[] args) throws IOException, ExecutionException, InterruptedException {
         System.out.println("Hello world!");
 
-
         // Find best match ColorHistogram ------------------------------------------------------------------------------
         // -------------------------------------------------------------------------------------------------------------
-        /*
         String queryVideoPath = args[0];
 
         // Database pre-processing
-        String databaseDirectory = "Database/MP4";
+        String databaseDirectory = "Database/RGB";
         List<VideoMetadata> database = preprocessDatabase(databaseDirectory);
         System.out.println("Database processing done");
 
@@ -32,20 +32,22 @@ public class Main {
         List<MatchedVideo> matchedVideos = testMatchVideos(database, queryHistograms);
         if (!matchedVideos.isEmpty()) {
             System.out.println("Top 10 matched videos:");
-            for (int i = 0; i < Math.min(10, matchedVideos.size()); i++) {
+            for (int i = 0; i < Math.min(1, matchedVideos.size()); i++) {
                 MatchedVideo matchedVideo = matchedVideos.get(i);
-                System.out.println("Video Name: " + matchedVideo.getVideoName() + " at frame: " + matchedVideo.getStartTime());
+                System.out.println("Video Name: " + matchedVideo.getVideoName());
                 System.out.println("Similarity Score: " + matchedVideo.getSimilarity());
                 System.out.println("-------------------------------------");
             }
         } else {
             System.out.println("No matched videos found.");
         }
-        */
+
+        System.out.println("Done matching the database and query videos");
+
 
         // Find best match MotionDetection -----------------------------------------------------------------------------
         // -------------------------------------------------------------------------------------------------------------
-        String sampleVideoPath = args[0];
+        String sampleVideoPath = args[1];
         String videoFolderPath = "Database/MP4";
         String databaseFilePath = "motiondb.txt"; // Motion db file path
         String queryFeaturesFilePath = "queryFeatures.txt";
@@ -60,7 +62,7 @@ public class Main {
         // -------------------------------------------------------------------------------------------------------------
         AudioParser audioParser = new AudioParser();
 
-        String queryPath = args[1];
+        String queryPath = args[2];
         audioParser.analyzeQuery(queryPath);
         audioParser.findBestMatch();
 
@@ -80,14 +82,13 @@ public class Main {
 
         // Find the agreed best match using all three digital signatures -----------------------------------------------
         // -------------------------------------------------------------------------------------------------------------
-        String[] overallBestMatch = findOverallMatch(audioResults, motionResults);
-        String overallBestMatchVid = overallBestMatch[0].substring(overallBestMatch[0].indexOf("v"));
-        System.out.println("The final match is " + overallBestMatchVid + " at frame " + overallBestMatch[1]);
+        //String[] overallBestMatch = findOverallMatch(audioResults, motionResults);
+        //String overallBestMatchVid = overallBestMatch[0].substring(overallBestMatch[0].indexOf("v"));
+        //System.out.println("The final match is " + overallBestMatchVid + " at frame " + overallBestMatch[1]);
 
         // Play the best match MP4 -------------------------------------------------------------------------------------
         // -------------------------------------------------------------------------------------------------------------
         //Application.launch(MP4Player.class, audioParser.currentMinVidAA, startTime);
-
 
     }
 
@@ -112,50 +113,132 @@ public class Main {
     }
 
     private static String[] findOverallMatch(List<String[]> audioResults, List<String[]> motionResults) {
+
         String[] bestMatch = null;
-    
-        // Define weights for motion and audio results
-        double motionWeight = 0.3; // Weight for motion results (lower weight for lower priority)
-        double audioWeight = 0.7;  // Weight for audio results (higher weight for higher priority)
-    
-        // Perform confidence check for motion
-        boolean motionMatchConfident = motionResults.size() >= 1 && "TRUE".equals(motionResults.get(0)[3]);
-    
+
+        // Assigning a third string in each top result to determine if it is a confident match
         // Perform confidence check for audio
-        boolean audioMatchConfident = audioResults.size() >= 1 && "TRUE".equals(audioResults.get(0)[2]);
-    
-        // Calculate scores based on confidence and weights
-        double motionScore = motionMatchConfident ? 1.0 : 0.0; // If confident, score is 1, else 0
-        double audioScore = audioMatchConfident ? 1.0 : 0.0;   // If confident, score is 1, else 0
-    
-        // If neither motion nor audio results are confident, prioritize motion result
-        if (!motionMatchConfident && !audioMatchConfident) {
-            if (!motionResults.isEmpty()) {
-                motionScore = 0.5; // Assign a default score if neither is confident
-            } else if (!audioResults.isEmpty()) {
-                audioScore = 0.5;  // Assign a default score if neither is confident
+        String[] audioMatch1 = audioResults.get(0);
+        String[] audioMatch2 = audioResults.get(1);
+        String[] audioMatch3 = audioResults.get(2);
+
+        String audioMatchVid1 = audioMatch1[0];
+        int audioMatchFrame1 = Integer.parseInt(audioMatch1[1]);
+
+        String audioMatchVid2 = audioMatch2[0];
+        int audioMatchFrame2 = Integer.parseInt(audioMatch2[1]);
+
+        String audioMatchVid3 = audioMatch3[0];
+        int audioMatchFrame3 = Integer.parseInt(audioMatch3[1]);
+
+        if (audioMatchVid1.equals(audioMatchVid2)) {
+
+            if ((audioMatchFrame1 == audioMatchFrame2 + 1) || (audioMatchFrame1 == audioMatchFrame2 - 1)) {
+
+                audioMatch1[2] = "TRUE";
+                audioResults.removeFirst();
+                audioResults.addFirst(audioMatch1);
+
             }
+
         }
-    
-        // Calculate weighted average score
-        double weightedMotionScore = motionScore * motionWeight;
-        double weightedAudioScore = audioScore * audioWeight;
-    
-        // Choose the best match based on weighted scores
-        if (weightedMotionScore < weightedAudioScore) { // Prioritizing audio over motion
-            bestMatch = audioResults.get(0);
-        } else if (weightedAudioScore < weightedMotionScore) {
-            bestMatch = motionResults.get(0);
-        } else { // If scores are equal, choose based on the order of preference (audio > motion)
-            if (!audioResults.isEmpty()) {
-                bestMatch = audioResults.get(0);
-            } else if (!motionResults.isEmpty()) {
-                bestMatch = motionResults.get(0);
+        else if (audioMatchVid1.equals(audioMatchVid3)) {
+
+            if ((audioMatchFrame1 == audioMatchFrame3 + 1) || (audioMatchFrame1 == audioMatchFrame3 - 1)) {
+
+                audioMatch1[2] = "TRUE";
+                audioResults.removeFirst();
+                audioResults.addFirst(audioMatch1);
+
             }
+
         }
-    
+
+        // Perform confidence check for motion
+        String[] motionMatch1 = motionResults.get(0);
+        String[] motionMatch2 = motionResults.get(1);
+        String[] motionMatch3 = motionResults.get(2);
+
+        String motionMatchVid1 = motionMatch1[0];
+        int motionMatchFrame1 = Integer.parseInt(motionMatch1[1]);
+
+        String motionMatchVid2 = motionMatch2[0];
+        int motionMatchFrame2 = Integer.parseInt(motionMatch2[1]);
+
+        String motionMatchVid3 = motionMatch3[0];
+        int motionMatchFrame3 = Integer.parseInt(motionMatch3[1]);
+
+        if (motionMatchVid1.equals(motionMatchVid2)) {
+
+            if ((motionMatchFrame1 == motionMatchFrame2 + 1) || (motionMatchFrame1 == motionMatchFrame2 - 1)) {
+
+                motionMatch1[3] = "TRUE";
+                motionResults.removeFirst();
+                motionResults.addFirst(motionMatch1);
+
+            }
+
+        }
+        else if (motionMatchVid1.equals(motionMatchVid3)) {
+
+            if ((motionMatchFrame1 == motionMatchFrame3 + 1) || (motionMatchFrame1 == motionMatchFrame3 - 1)) {
+
+                motionMatch1[3] = "TRUE";
+                motionResults.removeFirst();
+                motionResults.addFirst(motionMatch1);
+
+            }
+
+        }
+
+        // Finally determine best match overall
+        for (int i = 0; i < 3; i++) {
+
+            String[] audioMatch = audioResults.get(i);
+            String audioMatchVid = audioMatch[0];
+            String audioMatchFrame = audioMatch[1];
+
+            for (int j = 0; j < 3; j++) {
+
+                String[] motionMatch = motionResults.get(j);
+                String motionMatchPath = motionMatch[0];
+                String motionMatchVid = motionMatchPath.substring(motionMatchPath.indexOf("v"));
+                String motionMatchFrame = motionMatch[1];
+
+                if ((audioMatchVid.equals(motionMatchVid)) && (audioMatchFrame.equals(motionMatchFrame))) {
+
+                    bestMatch = audioMatch;
+                    break;
+
+                }
+
+            }
+
+        }
+
+        if (bestMatch == null) {
+
+            if (motionMatch1[3].equals("TRUE")) {
+
+                bestMatch = motionMatch1;
+
+            }
+            else if (audioMatch1[2].equals("TRUE")) {
+
+                bestMatch = audioMatch1;
+
+            }
+            else {
+
+                bestMatch = motionMatch1;
+
+            }
+
+        }
+
         return bestMatch;
-    }    
+
+    }
 
     private static List<VideoMetadata> preprocessDatabase(String databaseDirectory) {
         List<VideoMetadata> videoMetadataList = new ArrayList<>();
@@ -268,18 +351,27 @@ public class Main {
 
         try {
             ProcessBuilder processBuilder = new ProcessBuilder(
-                    "ffmpeg-master-latest-win64-gpl/bin/ffmpeg.exe", "-i", videoFilePath, "-vf", "fps=1", "-f", "image2pipe", "-pix_fmt", "rgb24", "-")
+                    "ffmpeg-master-latest-win64-gpl/bin/ffmpeg.exe", "-i", "Database/RGB", "-vf", "fps=1", "-f", "-pix_fmt", "rgb24", "image2pipe", "-")
                     .redirectErrorStream(true);
             Process process = processBuilder.start();
 
             InputStream inputStream = process.getInputStream();
-            byte[] buffer = new byte[1024];
+            byte[] buffer = new byte[1920 * 1080 * 3];
             int bytesRead;
 
-            while ((bytesRead = inputStream.read(buffer)) != -1) {
+            /*while ((bytesRead = inputStream.read(buffer)) != -1) {
                 ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(buffer, 0, bytesRead);
                 BufferedImage frame = ImageIO.read(byteArrayInputStream);
                 if (frame != null && !isBMP(frame)) {
+                    frames.add(frame);
+                }
+            }*/
+
+
+            while ((bytesRead = inputStream.read(buffer)) != -1) {
+                // Create a BufferedImage from the byte array
+                BufferedImage frame = createRGBImage(buffer, bytesRead,1920, 1080);
+                if (frame != null) {
                     frames.add(frame);
                 }
             }
@@ -290,6 +382,20 @@ public class Main {
         }
 
         return frames;
+    }
+
+    private static BufferedImage createRGBImage(byte[] bytes, int length, int width, int height) {
+        // Create BufferedImage from RGB pixel data
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        int[] rgbArray = new int[width * height]; // Assuming each pixel has RGB values (3 bytes per pixel)
+        for (int i = 0; i < length; i++) {
+            int r = bytes[i * 3] & 0xFF;
+            int g = bytes[i * 3 + 1] & 0xFF;
+            int b = bytes[i * 3 + 2] & 0xFF;
+            rgbArray[i] = (r << 16) | (g << 8) | b; // Create RGB value
+        }
+        image.setRGB(0, 0, width, height, rgbArray, 0, width);
+        return image;
     }
 
     private static boolean isBMP(BufferedImage image) {
@@ -332,13 +438,13 @@ public class Main {
             double sequenceSimilarity = calculateTemporalHistogramSimilarity(queryHistograms, databaseHistograms);
 
             double combinedSimilarity = colorHistogramSimilarity * sequenceSimilarity;
-            System.out.print("Similarity score is " + combinedSimilarity);
+            System.out.println("Similarity score is " + combinedSimilarity);
 
             MatchedVideo matchedVideo = new MatchedVideo(videoName, 0.0, combinedSimilarity);
 
             topMatches.offer(matchedVideo);
 
-            if (topMatches.size() > 10) {
+            if (topMatches.size() > 1) {
                 topMatches.poll();
             }
         }
