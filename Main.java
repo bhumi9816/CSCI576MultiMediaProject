@@ -112,132 +112,50 @@ public class Main {
     }
 
     private static String[] findOverallMatch(List<String[]> audioResults, List<String[]> motionResults) {
-
         String[] bestMatch = null;
-
-        // Assigning a third string in each top result to determine if it is a confident match
-        // Perform confidence check for audio
-        String[] audioMatch1 = audioResults.get(0);
-        String[] audioMatch2 = audioResults.get(1);
-        String[] audioMatch3 = audioResults.get(2);
-
-        String audioMatchVid1 = audioMatch1[0];
-        int audioMatchFrame1 = Integer.parseInt(audioMatch1[1]);
-
-        String audioMatchVid2 = audioMatch2[0];
-        int audioMatchFrame2 = Integer.parseInt(audioMatch2[1]);
-
-        String audioMatchVid3 = audioMatch3[0];
-        int audioMatchFrame3 = Integer.parseInt(audioMatch3[1]);
-
-        if (audioMatchVid1.equals(audioMatchVid2)) {
-
-            if ((audioMatchFrame1 == audioMatchFrame2 + 1) || (audioMatchFrame1 == audioMatchFrame2 - 1)) {
-
-                audioMatch1[2] = "TRUE";
-                audioResults.removeFirst();
-                audioResults.addFirst(audioMatch1);
-
-            }
-
-        }
-        else if (audioMatchVid1.equals(audioMatchVid3)) {
-
-            if ((audioMatchFrame1 == audioMatchFrame3 + 1) || (audioMatchFrame1 == audioMatchFrame3 - 1)) {
-
-                audioMatch1[2] = "TRUE";
-                audioResults.removeFirst();
-                audioResults.addFirst(audioMatch1);
-
-            }
-
-        }
-
+    
+        // Define weights for motion and audio results
+        double motionWeight = 0.3; // Weight for motion results (lower weight for lower priority)
+        double audioWeight = 0.7;  // Weight for audio results (higher weight for higher priority)
+    
         // Perform confidence check for motion
-        String[] motionMatch1 = motionResults.get(0);
-        String[] motionMatch2 = motionResults.get(1);
-        String[] motionMatch3 = motionResults.get(2);
-
-        String motionMatchVid1 = motionMatch1[0];
-        int motionMatchFrame1 = Integer.parseInt(motionMatch1[1]);
-
-        String motionMatchVid2 = motionMatch2[0];
-        int motionMatchFrame2 = Integer.parseInt(motionMatch2[1]);
-
-        String motionMatchVid3 = motionMatch3[0];
-        int motionMatchFrame3 = Integer.parseInt(motionMatch3[1]);
-
-        if (motionMatchVid1.equals(motionMatchVid2)) {
-
-            if ((motionMatchFrame1 == motionMatchFrame2 + 1) || (motionMatchFrame1 == motionMatchFrame2 - 1)) {
-
-                motionMatch1[3] = "TRUE";
-                motionResults.removeFirst();
-                motionResults.addFirst(motionMatch1);
-
+        boolean motionMatchConfident = motionResults.size() >= 1 && "TRUE".equals(motionResults.get(0)[3]);
+    
+        // Perform confidence check for audio
+        boolean audioMatchConfident = audioResults.size() >= 1 && "TRUE".equals(audioResults.get(0)[2]);
+    
+        // Calculate scores based on confidence and weights
+        double motionScore = motionMatchConfident ? 1.0 : 0.0; // If confident, score is 1, else 0
+        double audioScore = audioMatchConfident ? 1.0 : 0.0;   // If confident, score is 1, else 0
+    
+        // If neither motion nor audio results are confident, prioritize motion result
+        if (!motionMatchConfident && !audioMatchConfident) {
+            if (!motionResults.isEmpty()) {
+                motionScore = 0.5; // Assign a default score if neither is confident
+            } else if (!audioResults.isEmpty()) {
+                audioScore = 0.5;  // Assign a default score if neither is confident
             }
-
         }
-        else if (motionMatchVid1.equals(motionMatchVid3)) {
-
-            if ((motionMatchFrame1 == motionMatchFrame3 + 1) || (motionMatchFrame1 == motionMatchFrame3 - 1)) {
-
-                motionMatch1[3] = "TRUE";
-                motionResults.removeFirst();
-                motionResults.addFirst(motionMatch1);
-
+    
+        // Calculate weighted average score
+        double weightedMotionScore = motionScore * motionWeight;
+        double weightedAudioScore = audioScore * audioWeight;
+    
+        // Choose the best match based on weighted scores
+        if (weightedMotionScore < weightedAudioScore) { // Prioritizing audio over motion
+            bestMatch = audioResults.get(0);
+        } else if (weightedAudioScore < weightedMotionScore) {
+            bestMatch = motionResults.get(0);
+        } else { // If scores are equal, choose based on the order of preference (audio > motion)
+            if (!audioResults.isEmpty()) {
+                bestMatch = audioResults.get(0);
+            } else if (!motionResults.isEmpty()) {
+                bestMatch = motionResults.get(0);
             }
-
         }
-
-        // Finally determine best match overall
-        for (int i = 0; i < 3; i++) {
-
-            String[] audioMatch = audioResults.get(i);
-            String audioMatchVid = audioMatch[0];
-            String audioMatchFrame = audioMatch[1];
-
-            for (int j = 0; j < 3; j++) {
-
-                String[] motionMatch = motionResults.get(j);
-                String motionMatchPath = motionMatch[0];
-                String motionMatchVid = motionMatchPath.substring(motionMatchPath.indexOf("v"));
-                String motionMatchFrame = motionMatch[1];
-
-                if ((audioMatchVid.equals(motionMatchVid)) && (audioMatchFrame.equals(motionMatchFrame))) {
-
-                    bestMatch = audioMatch;
-                    break;
-
-                }
-
-            }
-
-        }
-
-        if (bestMatch == null) {
-
-            if (motionMatch1[3].equals("TRUE")) {
-
-                bestMatch = motionMatch1;
-
-            }
-            else if (audioMatch1[2].equals("TRUE")) {
-
-                bestMatch = audioMatch1;
-
-            }
-            else {
-
-                bestMatch = motionMatch1;
-
-            }
-
-        }
-
+    
         return bestMatch;
-
-    }
+    }    
 
     private static List<VideoMetadata> preprocessDatabase(String databaseDirectory) {
         List<VideoMetadata> videoMetadataList = new ArrayList<>();
