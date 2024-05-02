@@ -1,5 +1,7 @@
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
+import java.awt.image.DataBuffer;
+import java.awt.image.DataBufferByte;
 import java.io.*;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -16,7 +18,7 @@ public class Main {
         /**
          * Database Pre-Processing
          * */
-        String databaseDirectory = "/Users/ptbhum/Desktop/csci576:568/MultiMediaProjectColorHistogram/DatabaseVideos";
+        String databaseDirectory = "/Users/ptbhum/Desktop/csci576:568/MultiMediaProjectColorHistogram/RGB_Database";
         List<VideoMetadata> database = preprocessDatabase(databaseDirectory);
         System.out.println("Database processing done");
 
@@ -29,7 +31,7 @@ public class Main {
         List<MatchedVideo> matchedVideos = testMatchVideos(database, queryHistograms);
         if (!matchedVideos.isEmpty()) {
             System.out.println("Top 10 matched videos:");
-            for (int i = 0; i < Math.min(10, matchedVideos.size()); i++) {
+            for (int i = 0; i < Math.min(1, matchedVideos.size()); i++) {
                 MatchedVideo matchedVideo = matchedVideos.get(i);
                 System.out.println("Video Name: " + matchedVideo.getVideoName());
                 System.out.println("Similarity Score: " + matchedVideo.getSimilarity());
@@ -154,18 +156,27 @@ public class Main {
 
         try {
             ProcessBuilder processBuilder = new ProcessBuilder(
-                    "/Users/ptbhum/Desktop/csci576:568/MultiMediaProjectColorHistogram/ffmpeg", "-i", videoFilePath, "-vf", "fps=1", "-f", "image2pipe", "-pix_fmt", "rgb24", "-")
+                    "/Users/ptbhum/Desktop/csci576:568/MultiMediaProjectColorHistogram/ffmpeg", "-i", "/Users/ptbhum/Desktop/csci576:568/MultiMediaProjectColorHistogram/RGB_Database", "-vf", "fps=1", "-f", "-pix_fmt", "rgb24", "image2pipe", "-")
                     .redirectErrorStream(true);
             Process process = processBuilder.start();
 
             InputStream inputStream = process.getInputStream();
-            byte[] buffer = new byte[1024];
+            byte[] buffer = new byte[1920 * 1080 * 3];
             int bytesRead;
 
-            while ((bytesRead = inputStream.read(buffer)) != -1) {
+            /*while ((bytesRead = inputStream.read(buffer)) != -1) {
                 ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(buffer, 0, bytesRead);
                 BufferedImage frame = ImageIO.read(byteArrayInputStream);
                 if (frame != null && !isBMP(frame)) {
+                    frames.add(frame);
+                }
+            }*/
+
+
+            while ((bytesRead = inputStream.read(buffer)) != -1) {
+                // Create a BufferedImage from the byte array
+                BufferedImage frame = createRGBImage(buffer, bytesRead,1920, 1080);
+                if (frame != null) {
                     frames.add(frame);
                 }
             }
@@ -176,6 +187,20 @@ public class Main {
         }
 
         return frames;
+    }
+
+    private static BufferedImage createRGBImage(byte[] bytes, int length, int width, int height) {
+        // Create BufferedImage from RGB pixel data
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        int[] rgbArray = new int[width * height]; // Assuming each pixel has RGB values (3 bytes per pixel)
+        for (int i = 0; i < length; i++) {
+            int r = bytes[i * 3] & 0xFF;
+            int g = bytes[i * 3 + 1] & 0xFF;
+            int b = bytes[i * 3 + 2] & 0xFF;
+            rgbArray[i] = (r << 16) | (g << 8) | b; // Create RGB value
+        }
+        image.setRGB(0, 0, width, height, rgbArray, 0, width);
+        return image;
     }
 
     private static boolean isBMP(BufferedImage image) {
@@ -224,7 +249,7 @@ public class Main {
 
             topMatches.offer(matchedVideo);
 
-            if (topMatches.size() > 10) {
+            if (topMatches.size() > 1) {
                 topMatches.poll();
             }
         }
